@@ -311,6 +311,28 @@ class DeepseekV2AttentionMatAbsorbDecode(nn.Module):
             )
 
         else:
+            # pankaj begin
+            ##############
+            ##############
+            ##############
+            print("shapes before:", q_pe.shape, k_pe_cache.shape)
+            freqs_cis = precompute_freqs_cis(
+                self.qk_rope_head_dim, kv_len, self.rope_theta, use_scaled=False
+            ).to(k_pe_cache.device)
+            q_pe, k_pe_cache = apply_rotary_emb(
+                q_pe.unsqueeze(1).repeat(1, kv_len, 1, 1),
+                k_pe_cache.unsqueeze(2),
+                freqs_cis,
+            )
+            print("shapes:", q_pe.shape, k_pe_cache.shape)
+            q_pe = q_pe[:, -1:, :, :].squeeze(1).contiguous()
+            k_pe_cache = k_pe_cache.squeeze(2)
+            print("shapes after:", q_pe.shape, k_pe_cache.shape)
+            ##############
+            ##############
+            ##############
+            # pankaj end
+
             print("Now use MLA decode kernel!\n")
             if kv_len % page_size != 0:
                 raise ValueError(
