@@ -1685,14 +1685,14 @@ __global__ __launch_bounds__(KTraits::NUM_THREADS) void BatchPrefillWithRaggedKV
       if constexpr (has_maybe_q_rope_offset_v<Params>) {
         q_rope_offset = params.maybe_q_rope_offset;
       }
-      if (!q_rope_offset) {
-        q_smem_inplace_apply_rotary<KTraits>(qo_packed_idx_base, qo_len, kv_len, group_size,
-                                             &qo_smem, &q_smem_offset_r, rope_freq);
-      } else {
-        q_smem_inplace_apply_rotary_with_pos<KTraits>(
-            qo_packed_idx_base, q_rope_offset + q_indptr[request_idx], &qo_smem, group_size,
-            &q_smem_offset_r, rope_freq);
-      }
+      // if (!q_rope_offset) {
+      //   q_smem_inplace_apply_rotary<KTraits>(qo_packed_idx_base, qo_len, kv_len, group_size,
+      //                                        &qo_smem, &q_smem_offset_r, rope_freq);
+      // } else {
+      //   q_smem_inplace_apply_rotary_with_pos<KTraits>(
+      //       qo_packed_idx_base, q_rope_offset + q_indptr[request_idx], &qo_smem, group_size,
+      //       &q_smem_offset_r, rope_freq);
+      // }
       block.sync();
     }
     q_smem_inplace_transform<KTraits>(params, variant, &qo_smem);
@@ -1762,10 +1762,10 @@ __global__ __launch_bounds__(KTraits::NUM_THREADS) void BatchPrefillWithRaggedKV
         if constexpr (has_maybe_k_rope_offset_v<Params>) {
           k_rope_offset = params.maybe_k_rope_offset;
         }
-        k_smem_inplace_apply_rotary<KTraits>(
-            (k_rope_offset == nullptr ? 0 : k_rope_offset[request_idx]) + chunk_start +
-                iter * CTA_TILE_KV,
-            &k_smem, &k_smem_offset_r, rope_freq);
+        // k_smem_inplace_apply_rotary<KTraits>(
+        //     (k_rope_offset == nullptr ? 0 : k_rope_offset[request_idx]) + chunk_start +
+        //         iter * CTA_TILE_KV,
+        //     &k_smem, &k_smem_offset_r, rope_freq);
         block.sync();
       }
 
