@@ -90,6 +90,8 @@ trtllm_fp8_per_tensor_scale_routed_moe_topk8_e32_h7168.json
 Note: top_p_sampling files appear for vocab_size=151936 because
 top_k_top_p_sampling calls top_p_sampling internally.
 FP4 MoE files are only generated on Blackwell (SM100+) GPUs with fp4_quantize available.
+`--only-cute-dsl-nvfp4-situ` generates the independent gate/up scale example
+`cute_dsl_moe_wrapper_e8_h256.json` without running the other examples.
 GDN prefill files require SM90+ (Hopper) GPU.
 MSA (msa_*) files require SM120/SM121 (consumer Blackwell) GPUs.
 trtllm_batch_decode_block_sparse_h16_kv2_d128_ps16.json requires SM100/SM103 GPUs.
@@ -98,6 +100,7 @@ trtllm_batch_decode_block_sparse_h16_kv2_d128_ps16.json requires SM100/SM103 GPU
 import contextlib
 import json
 import os
+import sys
 from pathlib import Path
 
 # Must be set before any flashinfer import: template.py reads these at module load time.
@@ -127,6 +130,53 @@ from flashinfer.prefill import (
     fmha_v2_prefill_sm120,
 )
 from flashinfer.mla import BatchMLAPagedAttentionWrapper
+
+
+def example_cute_dsl_nvfp4_situ():
+    from tests.moe.utils import create_moe_tensors
+
+    tensors = create_moe_tensors(
+        num_tokens=128,
+        hidden_size=256,
+        intermediate_size=512,
+        num_experts=8,
+        num_local_experts=8,
+        top_k=2,
+        use_per_token_activation=True,
+    )
+    wrapper = flashinfer.CuteDslMoEWrapper(
+        num_experts=8,
+        top_k=2,
+        hidden_size=256,
+        intermediate_size=512,
+        situ_beta=4.0,
+        situ_linear_beta=25.0,
+    )
+    gate = torch.linspace(0.6, 1.4, 8, device="cuda")
+    up = torch.linspace(2.5, 0.2, 8, device="cuda")
+    wrapper.run(
+        x=tensors["x"],
+        x_sf=tensors["x_sf"],
+        token_selected_experts=tensors["token_selected_experts"],
+        token_final_scales=tensors["token_final_scales"],
+        w1_weight=tensors["w1_weight"],
+        w1_weight_sf=tensors["w1_weight_sf"],
+        w1_alpha=torch.stack((gate, up), dim=1).flatten(),
+        fc2_input_scale=tensors["fc2_input_scale"],
+        w2_weight=tensors["w2_weight"],
+        w2_weight_sf=tensors["w2_weight_sf"],
+        w2_alpha=tensors["w2_alpha"],
+        per_token_scale=tensors["x_per_token_scale"],
+    )
+    torch.cuda.synchronize()
+
+
+if sys.argv[1:] == ["--only-cute-dsl-nvfp4-situ"]:
+    example_cute_dsl_nvfp4_situ()
+    raise SystemExit(0)
+
+if torch.cuda.get_device_capability() in ((10, 0), (10, 3)):
+    example_cute_dsl_nvfp4_situ()
 
 device = "cuda"
 WORKSPACE = 128 * 1024 * 1024  # 128 MB
