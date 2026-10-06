@@ -201,7 +201,8 @@ def _moe_core_impl(
         w1_weight: GEMM1 weights (gate + up fused for gated activations, or a
             single projection for non-gated activations).
         w1_weight_sf: Scale factors for w1_weight.
-        w1_alpha: Per-expert global scale for GEMM1.
+        w1_alpha: Per-expert global scale for GEMM1. Blackwell W4A4 SiTU also
+            accepts 2*E flattened values, ordered gate, up for each local expert.
         fc2_input_scale: Global scale for GEMM2 input quantization.
         w2_weight: GEMM2 weights (down projection).
         w2_weight_sf: Scale factors for w2_weight.
@@ -481,6 +482,8 @@ class CuteDslMoEWrapper:
         >>> with autotune(True):
         ...     output = moe.run(x, x_sf, topk_ids, topk_weights, w1, w1_sf, ...)
     """
+
+    independent_situ_scale_api = 1
 
     @supported_compute_capability([100, 103, 107])
     @flashinfer_api
@@ -794,7 +797,8 @@ class CuteDslMoEWrapper:
         w1_weight_sf : torch.Tensor
             Scale factors for ``w1_weight``.
         w1_alpha : torch.Tensor
-            Per-expert global scale for GEMM1.
+            E shared global scales. Blackwell W4A4 SiTU also accepts 2*E
+            flattened values, ordered gate, up for each local expert.
         fc2_input_scale : Optional[torch.Tensor]
             Global scale for W4A4 GEMM2 input quantization; must be ``None``
             for W4A16 because GEMM1 output stays in BF16.
@@ -816,6 +820,11 @@ class CuteDslMoEWrapper:
             Output tensor of shape ``[num_tokens, hidden_size]``.
         """
         num_tokens = token_selected_experts.size(0)
+
+        if self.quant_mode == "w4a16" and w1_alpha.numel() != self.num_local_experts:
+            raise NotImplementedError(
+                "Independent gate/up scales require Blackwell W4A4 SiTU"
+            )
 
         moe_output = torch.empty(
             (num_tokens, self.hidden_size),
@@ -1123,6 +1132,11 @@ def cute_dsl_fused_moe_nvfp4(
 
     if num_local_experts is None:
         num_local_experts = num_experts
+
+    if quant_mode == "w4a16" and w1_alpha.numel() != num_local_experts:
+        raise NotImplementedError(
+            "Independent gate/up scales require Blackwell W4A4 SiTU"
+        )
 
     num_tokens = token_selected_experts.size(0)
     hidden_size = w2_weight.size(1)

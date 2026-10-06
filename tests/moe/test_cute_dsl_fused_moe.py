@@ -1766,7 +1766,14 @@ class TestCuteDslFusedMoeFunctional:
         )
 
     @pytest.mark.parametrize(
-        "quant_mode,use_per_token_activation", _MOE_QUANT_MODE_CASES
+        "quant_mode,use_per_token_activation,separate_scales",
+        [
+            ("w4a4", False, False),
+            ("w4a4", True, False),
+            ("w4a16", False, False),
+            ("w4a4", False, True),
+            ("w4a4", True, True),
+        ],
     )
     @pytest.mark.parametrize(
         "situ_beta,situ_linear_beta",
@@ -1777,6 +1784,7 @@ class TestCuteDslFusedMoeFunctional:
         self,
         quant_mode: str,
         use_per_token_activation: bool,
+        separate_scales: bool,
         situ_beta: float,
         situ_linear_beta: float | None,
     ):
@@ -1802,9 +1810,19 @@ class TestCuteDslFusedMoeFunctional:
             gated=True,
             use_per_token_activation=use_per_token_activation,
         )
+        if separate_scales:
+            gate = torch.linspace(0.6, 1.4, num_experts, device="cuda")
+            up = torch.linspace(2.5, 0.2, num_experts, device="cuda")
+            tensors["w1_alpha"] = torch.stack((gate, up), dim=1).flatten()
         api_inputs, reference_inputs = _prepare_moe_quant_mode_inputs(
             tensors, quant_mode
         )
+        if separate_scales:
+            weights = reference_inputs["gemm1_weights"].clone()
+            weights[:, :intermediate_size] *= up[:, None, None]
+            weights[:, intermediate_size:] *= gate[:, None, None]
+            reference_inputs["gemm1_weights"] = weights
+            reference_inputs["gemm1_alpha"] = torch.ones_like(gate)
 
         result = cute_dsl_fused_moe_nvfp4(
             token_selected_experts=tensors["token_selected_experts"],

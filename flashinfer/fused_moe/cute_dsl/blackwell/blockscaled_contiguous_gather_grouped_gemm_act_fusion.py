@@ -429,6 +429,7 @@ class BlockScaledContiguousGatherGroupedGemmKernel:
         situ_linear_beta: Optional[float] = None,
         gated: bool = True,
         use_a_per_token_scale: bool = False,
+        separate_gate_up_alpha: bool = False,
     ):
         """Initializes the configuration for a Blackwell blockscaled dense GEMM kernel with
         gather operation and FC1 activation fusion.
@@ -588,6 +589,7 @@ class BlockScaledContiguousGatherGroupedGemmKernel:
         self.swiglu_limit = swiglu_limit
         self.situ_beta = situ_beta
         self.situ_linear_beta = situ_linear_beta
+        self.separate_gate_up_alpha = separate_gate_up_alpha
 
     def _setup_attributes(self):
         """Set up configurations that are dependent on GEMM inputs
@@ -2652,7 +2654,12 @@ class BlockScaledContiguousGatherGroupedGemmKernel:
                 #
 
                 expert_idx = mma_tile_coord_mnl[2]
-                alpha_val = alpha[expert_idx]
+                if cutlass.const_expr(self.separate_gate_up_alpha):
+                    alpha_val = alpha[2 * expert_idx]
+                    alpha_up_val = alpha[2 * expert_idx + 1]
+                else:
+                    alpha_val = alpha[expert_idx]
+                    alpha_up_val = alpha_val
                 if cutlass.const_expr(self.use_a_per_token_scale):
                     tile_m_start = tile_info[0] * self.cta_tile_shape_mnk[0]
                     permuted_row = tile_m_start + epi_tidx
@@ -2660,6 +2667,7 @@ class BlockScaledContiguousGatherGroupedGemmKernel:
                         expanded_idx = token_id_mapping_tensor[permuted_row]
                         token_idx = expanded_idx // self.topk
                         alpha_val = alpha_val * a_per_token_scale[token_idx]
+                        alpha_up_val = alpha_up_val * a_per_token_scale[token_idx]
 
                 #
                 # Slice to per mma tile index
@@ -2817,8 +2825,8 @@ class BlockScaledContiguousGatherGroupedGemmKernel:
                                     acc_vec_up_alpha = cute.arch.mul_packed_f32x2(
                                         (acc_vec_up[i], acc_vec_up[i + 1]),
                                         (
-                                            cutlass.Float32(alpha_val),
-                                            cutlass.Float32(alpha_val),
+                                            cutlass.Float32(alpha_up_val),
+                                            cutlass.Float32(alpha_up_val),
                                         ),
                                     )
                                     acc_vec_gate_alpha = cute.arch.mul_packed_f32x2(
@@ -2866,7 +2874,7 @@ class BlockScaledContiguousGatherGroupedGemmKernel:
                                     cute.size(tTR_rAcc_up)
                                 ):
                                     acc_vec_up_alpha = acc_vec_up[i] * cutlass.Float32(
-                                        alpha_val
+                                        alpha_up_val
                                     )
                                     acc_vec_gate_alpha = acc_vec_gate[
                                         i
@@ -4051,7 +4059,10 @@ class BlockScaledContiguousGatherGroupedGemmKernel:
             if cutlass.const_expr(c_sf_ptr is not None)
             else None
         )
-        alpha = cute.make_tensor(alpha_ptr, layout=cute.make_layout((l,)))
+        alpha = cute.make_tensor(
+            alpha_ptr,
+            layout=cute.make_layout((l * (2 if self.separate_gate_up_alpha else 1),)),
+        )
         a_per_token_scale = (
             cute.make_tensor(a_per_token_scale_ptr, layout=cute.make_layout((orig_m,)))
             if cutlass.const_expr(a_per_token_scale_ptr is not None)

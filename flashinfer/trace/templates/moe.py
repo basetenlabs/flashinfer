@@ -3609,6 +3609,9 @@ cute_dsl_fused_moe_nvfp4_trace = TraceTemplate(
                 "intermediate_size for non-gated ReLU^2."
             ),
         ),
+        "gemm1_scale_count": Var(
+            description="E shared or 2*E independent gate/up scales."
+        ),
     },
     inputs={
         "x": Tensor(
@@ -3639,9 +3642,9 @@ cute_dsl_fused_moe_nvfp4_trace = TraceTemplate(
             description="FC1 NvFP4 scales.",
         ),
         "w1_alpha": Tensor(
-            ["num_local_experts"],
+            ["gemm1_scale_count"],
             dtype="float32",
-            description="Per-expert FC1 global scale.",
+            description="FC1 global scales: E shared or 2*E flattened gate/up pairs (Blackwell W4A4 SiTU).",
         ),
         "fc2_input_scale": Tensor(
             ["one"],
@@ -4168,6 +4171,32 @@ def _cute_dsl_fused_moe_nvfp4_reference(
     weights."""
     E_local = w1_weight.shape[0]
     # Dequantize input and weights with alpha factors.
+    if w1_weight_sf.ndim == 6:
+
+        def linear_scales(scales, rows, blocks):
+            # (row%32, row//32%4, row//128, col%4, col//4, expert)
+            # becomes ordinary (expert, row, col), excluding padding.
+            return (
+                scales.permute(5, 2, 1, 0, 4, 3)
+                .contiguous()
+                .view(scales.shape[5], scales.shape[2] * 128, scales.shape[4] * 4)[
+                    :, :rows, :blocks
+                ]
+                .view(torch.float8_e4m3fn)
+            )
+
+        w1_weight_sf = linear_scales(
+            w1_weight_sf, w1_weight.shape[1], w1_weight.shape[2] // 8
+        )
+        w2_weight_sf = linear_scales(
+            w2_weight_sf, w2_weight.shape[1], w2_weight.shape[2] // 8
+        )
+        if x_sf is not None:
+            if x_sf.ndim == 6:
+                x_sf = linear_scales(x_sf, x.shape[0], x.shape[1] // 8)[0]
+        interleaved_weights = True
+    else:
+        interleaved_weights = False
     quant_mode = quant_mode.lower()
     if quant_mode in ("nvfp4", "w4a4"):
         if x_sf is None:
@@ -4181,9 +4210,21 @@ def _cute_dsl_fused_moe_nvfp4_reference(
         raise ValueError(f"Unsupported quant_mode {quant_mode!r}")
     W1 = _dequantize_fp4_tensor(w1_weight, w1_weight_sf, is_ue8m0_scales=False)
     W2 = _dequantize_fp4_tensor(w2_weight, w2_weight_sf, is_ue8m0_scales=False)
+    if interleaved_weights:
+        # Native CuTe GEMM1 stores alternating 64-row Up/Gate tiles.
+        W1 = W1.reshape(E_local, -1, 2, 64, W1.shape[-1])
+        W1 = W1.permute(0, 2, 1, 3, 4).reshape(E_local, w1_weight.shape[1], -1)
     if per_token_scale is not None:
         hs_deq = hs_deq * per_token_scale.to(torch.float32).view(-1, 1)
-    W1 = W1 * w1_alpha.to(torch.float32).view(E_local, 1, 1)
+    if w1_alpha.numel() == 2 * E_local:
+        gate_up = w1_alpha.to(torch.float32).view(E_local, 2)
+        # Reference weights are deinterleaved [Up, Gate]. Apply each scale
+        # before its nonlinear activation, independently of the kernel layout.
+        W1 = W1.reshape(E_local, 2, -1, W1.shape[-1])
+        W1 = W1 * gate_up.flip(1).view(E_local, 2, 1, 1)
+        W1 = W1.flatten(1, 2)
+    else:
+        W1 = W1 * w1_alpha.to(torch.float32).view(E_local, 1, 1)
     W2 = W2 * w2_alpha.to(torch.float32).view(E_local, 1, 1)
     return _moe_bf16_run_experts(
         hs_deq,

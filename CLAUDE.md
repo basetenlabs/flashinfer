@@ -627,6 +627,12 @@ users should normally leave the batch-size policy at its defaults.
 
 ### Modifying Existing Kernels
 
+Blackwell CuTe W4A4 SiTU accepts either E shared GEMM1 scales or 2*E flattened
+gate/up pairs. `CuteDslMoEWrapper.independent_situ_scale_api == 1` identifies
+this contract. Both branch scales apply before their nonlinear activations,
+including the optional up-branch tanh. The compile cache distinguishes these
+layouts. W4A16, Rubin and other activations reject independent pairs.
+
 - **Kernel templates**: `include/flashinfer/**/*.cuh` - Changes picked up on next JIT compile
 - **Launcher code**: `csrc/*.cu` - May need changes if adding new template parameters
 - **Jinja templates**: `csrc/*.jinja` - Update if adding new config parameters

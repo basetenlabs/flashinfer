@@ -269,6 +269,7 @@ def _get_compiled_gather_kernel(
     situ_linear_beta: Optional[float] = None,
     gated: bool = True,
     use_a_per_token_scale: bool = False,
+    separate_gate_up_alpha: bool = False,
 ):
     """Get or compile the gather grouped GEMM with FC1 activation fusion.
 
@@ -317,10 +318,15 @@ def _get_compiled_gather_kernel(
         situ_linear_beta,
         gated,
         use_a_per_token_scale,
+        separate_gate_up_alpha,
     )
 
     if cache_key not in _gather_kernel_cache:
         if is_rubin:
+            if separate_gate_up_alpha:
+                raise NotImplementedError(
+                    "Independent gate/up scales require Blackwell SiTU"
+                )
             # The Rubin (SM107) kernel currently only implements the gated
             # (SwiGLU) activation path with the default SwiGLU constants.
             if normalized_activation_type != ActivationType.Swiglu:
@@ -374,6 +380,7 @@ def _get_compiled_gather_kernel(
                 situ_linear_beta=situ_linear_beta,
                 gated=gated,
                 use_a_per_token_scale=use_a_per_token_scale,
+                separate_gate_up_alpha=separate_gate_up_alpha,
             )
         wrapper_fn = gemm.wrapper
 
@@ -478,7 +485,10 @@ def _blockscaled_contiguous_gather_grouped_gemm_act_fusion(
            gate and up projection weights.
         a_scale: Scale factors for A in MMA-compatible layout
         b_scale: Scale factors for B in MMA-compatible layout
-        alpha: Per-expert scaling factors, shape (num_experts,), float32
+        alpha: Per-expert scaling factors, shape (num_experts,), float32.
+            Blackwell SiTU also accepts a contiguous flattened (gate, up) pair
+            for each expert, shape (2*num_experts,). The two scales apply before
+            their respective nonlinear activations.
         tile_idx_to_expert_idx: Mapping from tile index to expert index, shape (num_tiles,), int32
         tile_idx_to_mn_limit: M limit for each tile for boundary checking, shape (num_tiles,), int32
         token_id_mapping: Mapping from permuted row to token_id, shape (permuted_m,), int32
@@ -581,6 +591,17 @@ def _blockscaled_contiguous_gather_grouped_gemm_act_fusion(
     # Get dimensions
     seq_len = a.shape[0]
     num_experts = b.shape[0]
+    if (
+        alpha.device != a.device
+        or alpha.dtype != torch.float32
+        or not alpha.is_contiguous()
+        or alpha.ndim != 1
+        or alpha.numel() not in (num_experts, 2 * num_experts)
+    ):
+        raise ValueError("alpha must be contiguous CUDA float32 with E or 2*E values")
+    separate_gate_up_alpha = alpha.numel() == 2 * num_experts
+    if separate_gate_up_alpha and (not gated or situ_beta is None):
+        raise NotImplementedError("Independent gate/up scales require Blackwell SiTU")
     n = b.shape[1]
     k = a.shape[1]
     if a_dtype == "float4_e2m1fn":
@@ -856,6 +877,7 @@ def _blockscaled_contiguous_gather_grouped_gemm_act_fusion(
         situ_linear_beta=situ_linear_beta,
         gated=gated,
         use_a_per_token_scale=use_a_per_token_scale,
+        separate_gate_up_alpha=separate_gate_up_alpha,
     )
 
     # Execute kernel with runtime parameters.
