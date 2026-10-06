@@ -3612,6 +3612,14 @@ cute_dsl_fused_moe_nvfp4_trace = TraceTemplate(
         "gemm1_scale_count": Var(
             description="E shared or 2*E independent gate/up scales."
         ),
+        "sf_outer_rows": Const(abbrev=""),
+        "sf_row_group": Const(abbrev=""),
+        "sf_col_group": Const(abbrev=""),
+        "w1_row_tiles": Var(),
+        "w1_col_tiles": Var(),
+        "w2_row_tiles": Var(),
+        "w2_col_tiles": Var(),
+        "input_scale_groups": Var(),
     },
     inputs={
         "x": Tensor(
@@ -3619,7 +3627,7 @@ cute_dsl_fused_moe_nvfp4_trace = TraceTemplate(
             description="Packed NVFP4 input for W4A4 or BF16 input for W4A16.",
         ),
         "x_sf": Tensor(
-            ["num_tokens", "num_fp4_hidden_blocks"],
+            ["num_tokens", "num_fp4_hidden_blocks", "input_scale_groups"],
             optional=True,
             description="NVFP4 activation scales for W4A4; omitted for W4A16.",
         ),
@@ -3638,8 +3646,15 @@ cute_dsl_fused_moe_nvfp4_trace = TraceTemplate(
             description="FC1 weights, NvFP4-packed.",
         ),
         "w1_weight_sf": Tensor(
-            ["num_local_experts", "gemm1_out_size", "num_fp4_hidden_blocks"],
-            description="FC1 NvFP4 scales.",
+            [
+                "sf_outer_rows",
+                "sf_row_group",
+                "w1_row_tiles",
+                "sf_col_group",
+                "w1_col_tiles",
+                "num_local_experts",
+            ],
+            description="FC1 NvFP4 scales in six-dimensional MMA layout.",
         ),
         "w1_alpha": Tensor(
             ["gemm1_scale_count"],
@@ -3659,8 +3674,15 @@ cute_dsl_fused_moe_nvfp4_trace = TraceTemplate(
             description="FC2 weights, NvFP4-packed.",
         ),
         "w2_weight_sf": Tensor(
-            ["num_local_experts", "hidden_size", "num_fp4_intermediate_blocks"],
-            description="FC2 NvFP4 scales.",
+            [
+                "sf_outer_rows",
+                "sf_row_group",
+                "w2_row_tiles",
+                "sf_col_group",
+                "w2_col_tiles",
+                "num_local_experts",
+            ],
+            description="FC2 NvFP4 scales in six-dimensional MMA layout.",
         ),
         "w2_alpha": Tensor(
             ["num_local_experts"],
@@ -4201,6 +4223,8 @@ def _cute_dsl_fused_moe_nvfp4_reference(
     if quant_mode in ("nvfp4", "w4a4"):
         if x_sf is None:
             raise ValueError("x_sf is required when quant_mode='w4a4'")
+        if x_sf.ndim == 3 and x_sf.shape[-1] == 1:
+            x_sf = x_sf.squeeze(-1)
         hs_deq = _dequantize_fp4_tensor(x, x_sf, is_ue8m0_scales=False)
     elif quant_mode == "w4a16":
         if x_sf is not None:
