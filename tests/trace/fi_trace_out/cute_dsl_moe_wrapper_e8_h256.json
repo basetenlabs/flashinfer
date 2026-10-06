@@ -1,0 +1,277 @@
+{
+  "name": "cute_dsl_moe_wrapper_e8_h256",
+  "description": "CuteDslMoEWrapper.run(): stateful version of cute_dsl_fused_moe_nvfp4 (same schema; wrapper persists autotuning state across calls).",
+  "op_type": "moe",
+  "tags": [
+    "fi_api:flashinfer.fused_moe.cute_dsl.fused_moe.CuteDslMoEWrapper.run",
+    "status:experimental",
+    "backend:cute-dsl",
+    "quantization:nvfp4"
+  ],
+  "axes": {
+    "num_tokens": {
+      "type": "var",
+      "description": "Total tokens across the batch."
+    },
+    "num_experts": {
+      "type": "var",
+      "description": "Total number of experts."
+    },
+    "top_k": {
+      "type": "var",
+      "description": "Experts per token."
+    },
+    "num_local_experts": {
+      "type": "const",
+      "value": 8
+    },
+    "hidden_size": {
+      "type": "const",
+      "value": 256
+    },
+    "intermediate_size": {
+      "type": "var",
+      "description": "MoE intermediate size (kwarg)."
+    },
+    "input_width": {
+      "type": "var",
+      "description": "hidden_size // 2 for NVFP4 input or hidden_size for BF16."
+    },
+    "num_packed_hidden": {
+      "type": "var",
+      "description": "hidden_size // 2 (NvFP4 packed)."
+    },
+    "num_packed_intermediate": {
+      "type": "var",
+      "description": "intermediate_size // 2 (NvFP4 packed)."
+    },
+    "num_fp4_hidden_blocks": {
+      "type": "var",
+      "description": "NvFP4 scale-factor count along hidden_size."
+    },
+    "num_fp4_intermediate_blocks": {
+      "type": "var",
+      "description": "NvFP4 scale-factor count along intermediate_size."
+    },
+    "gemm1_out_size": {
+      "type": "const",
+      "value": 1024,
+      "description": "FC1 output rows: 2 * intermediate_size for gated SwiGLU, intermediate_size for non-gated ReLU^2."
+    },
+    "gemm1_scale_count": {
+      "type": "var",
+      "description": "E shared or 2*E independent gate/up scales."
+    },
+    "sf_outer_rows": {
+      "type": "const",
+      "value": 32
+    },
+    "sf_row_group": {
+      "type": "const",
+      "value": 4
+    },
+    "sf_col_group": {
+      "type": "const",
+      "value": 4
+    },
+    "w1_row_tiles": {
+      "type": "var"
+    },
+    "w1_col_tiles": {
+      "type": "var"
+    },
+    "w2_row_tiles": {
+      "type": "var"
+    },
+    "w2_col_tiles": {
+      "type": "var"
+    },
+    "input_scale_groups": {
+      "type": "var"
+    },
+    "one": {
+      "type": "var",
+      "description": "Placeholder for shape [1] scalars."
+    }
+  },
+  "inputs": {
+    "x": {
+      "shape": [
+        "num_tokens",
+        "input_width"
+      ],
+      "dtype": "uint8",
+      "description": "Packed NVFP4 input for W4A4 or BF16 input for W4A16."
+    },
+    "x_sf": {
+      "shape": [
+        "num_tokens",
+        "num_fp4_hidden_blocks",
+        "input_scale_groups"
+      ],
+      "dtype": "uint8",
+      "optional": true,
+      "description": "NVFP4 activation scales for W4A4; omitted for W4A16."
+    },
+    "token_selected_experts": {
+      "shape": [
+        "num_tokens",
+        "top_k"
+      ],
+      "dtype": "int32",
+      "description": "Precomputed top-k expert ids per token."
+    },
+    "token_final_scales": {
+      "shape": [
+        "num_tokens",
+        "top_k"
+      ],
+      "dtype": "float32",
+      "description": "Precomputed per-token routing scales."
+    },
+    "w1_weight": {
+      "shape": [
+        "num_local_experts",
+        "gemm1_out_size",
+        "num_packed_hidden"
+      ],
+      "dtype": "uint8",
+      "description": "FC1 weights, NvFP4-packed."
+    },
+    "w1_weight_sf": {
+      "shape": [
+        "sf_outer_rows",
+        "sf_row_group",
+        "w1_row_tiles",
+        "sf_col_group",
+        "w1_col_tiles",
+        "num_local_experts"
+      ],
+      "dtype": "uint8",
+      "description": "FC1 NvFP4 scales in six-dimensional MMA layout."
+    },
+    "w1_alpha": {
+      "shape": [
+        "gemm1_scale_count"
+      ],
+      "dtype": "float32",
+      "description": "FC1 global scales: E shared or 2*E flattened gate/up pairs (Blackwell W4A4 SiTU)."
+    },
+    "fc2_input_scale": {
+      "shape": [
+        "one"
+      ],
+      "dtype": "float32",
+      "optional": true,
+      "description": "Global scale for W4A4 FC2 input quantization; omitted for W4A16."
+    },
+    "w2_weight": {
+      "shape": [
+        "num_local_experts",
+        "hidden_size",
+        "num_packed_intermediate"
+      ],
+      "dtype": "uint8",
+      "description": "FC2 weights, NvFP4-packed."
+    },
+    "w2_weight_sf": {
+      "shape": [
+        "sf_outer_rows",
+        "sf_row_group",
+        "w2_row_tiles",
+        "sf_col_group",
+        "w2_col_tiles",
+        "num_local_experts"
+      ],
+      "dtype": "uint8",
+      "description": "FC2 NvFP4 scales in six-dimensional MMA layout."
+    },
+    "w2_alpha": {
+      "shape": [
+        "num_local_experts"
+      ],
+      "dtype": "float32",
+      "description": "Per-expert FC2 global scale."
+    },
+    "per_token_scale": {
+      "shape": [
+        "num_tokens"
+      ],
+      "dtype": "float32",
+      "optional": true,
+      "description": "Optional W4A4 per-token input row scale."
+    },
+    "quant_mode": {
+      "shape": null,
+      "dtype": "string",
+      "optional": true,
+      "description": "Compute mode set at wrapper __init__, not passed to run()."
+    },
+    "num_experts": {
+      "shape": null,
+      "dtype": "int32",
+      "optional": true,
+      "description": "Set at wrapper __init__, not passed to run()."
+    },
+    "top_k": {
+      "shape": null,
+      "dtype": "int32",
+      "optional": true,
+      "description": "Set at wrapper __init__, not passed to run()."
+    },
+    "local_expert_offset": {
+      "shape": null,
+      "dtype": "int32",
+      "optional": true,
+      "description": "Offset of local experts."
+    },
+    "activation_type": {
+      "shape": null,
+      "dtype": "int32",
+      "optional": true,
+      "description": "Set at wrapper __init__, not passed to run()."
+    },
+    "swiglu_alpha": {
+      "shape": null,
+      "dtype": "float32",
+      "optional": true,
+      "description": "Set at wrapper __init__, not passed to run()."
+    },
+    "swiglu_beta": {
+      "shape": null,
+      "dtype": "float32",
+      "optional": true,
+      "description": "Set at wrapper __init__, not passed to run()."
+    },
+    "swiglu_limit": {
+      "shape": null,
+      "dtype": "float32",
+      "optional": true,
+      "description": "Set at wrapper __init__, not passed to run()."
+    },
+    "situ_beta": {
+      "shape": null,
+      "dtype": "float32",
+      "optional": true,
+      "description": "Set at wrapper __init__, not passed to run()."
+    },
+    "situ_linear_beta": {
+      "shape": null,
+      "dtype": "float32",
+      "optional": true,
+      "description": "Set at wrapper __init__, not passed to run()."
+    }
+  },
+  "outputs": {
+    "output": {
+      "shape": [
+        "num_tokens",
+        "hidden_size"
+      ],
+      "dtype": "bfloat16",
+      "description": "MoE output."
+    }
+  },
+  "reference": "from __future__ import annotations\nimport math\nimport torch\nimport torch.nn.functional as F\n\n@torch.no_grad()\ndef _cute_dsl_fused_moe_nvfp4_reference(\n    x,\n    x_sf,\n    token_selected_experts,\n    token_final_scales,\n    w1_weight,\n    w1_weight_sf,\n    w1_alpha,\n    fc2_input_scale,\n    w2_weight,\n    w2_weight_sf,\n    w2_alpha,\n    num_experts,\n    top_k,\n    activation_type=ActivationType.Swiglu.value,\n    swiglu_alpha=DEFAULT_SWIGLU_ALPHA,\n    swiglu_beta=DEFAULT_SWIGLU_BETA,\n    swiglu_limit=DEFAULT_SWIGLU_LIMIT,\n    quant_mode=\"w4a4\",\n    situ_beta=None,\n    situ_linear_beta=None,\n    per_token_scale=None,\n    **_unused,\n):\n    \"\"\"Reference for CuteDSL NvFP4 fused MoE \u2014 bridges to the FP4\n    block-scale kernel with alpha scales folded into the dequantized\n    weights.\"\"\"\n    E_local = w1_weight.shape[0]\n    # Dequantize input and weights with alpha factors.\n    if w1_weight_sf.ndim == 6:\n\n        def linear_scales(scales, rows, blocks):\n            # (row%32, row//32%4, row//128, col%4, col//4, expert)\n            # becomes ordinary (expert, row, col), excluding padding.\n            return (\n                scales.permute(5, 2, 1, 0, 4, 3)\n                .contiguous()\n                .view(scales.shape[5], scales.shape[2] * 128, scales.shape[4] * 4)[\n                    :, :rows, :blocks\n                ]\n                .view(torch.float8_e4m3fn)\n            )\n\n        w1_weight_sf = linear_scales(\n            w1_weight_sf, w1_weight.shape[1], w1_weight.shape[2] // 8\n        )\n        w2_weight_sf = linear_scales(\n            w2_weight_sf, w2_weight.shape[1], w2_weight.shape[2] // 8\n        )\n        if x_sf is not None:\n            if x_sf.ndim == 6:\n                x_sf = linear_scales(x_sf, x.shape[0], x.shape[1] // 8)[0]\n        interleaved_weights = True\n    else:\n        interleaved_weights = False\n    quant_mode = quant_mode.lower()\n    if quant_mode in (\"nvfp4\", \"w4a4\"):\n        if x_sf is None:\n            raise ValueError(\"x_sf is required when quant_mode='w4a4'\")\n        if x_sf.ndim == 3 and x_sf.shape[-1] == 1:\n            x_sf = x_sf.squeeze(-1)\n        hs_deq = _dequantize_fp4_tensor(x, x_sf, is_ue8m0_scales=False)\n    elif quant_mode == \"w4a16\":\n        if x_sf is not None:\n            raise ValueError(\"x_sf must be None when quant_mode='w4a16'\")\n        hs_deq = x.to(torch.float32)\n    else:\n        raise ValueError(f\"Unsupported quant_mode {quant_mode!r}\")\n    W1 = _dequantize_fp4_tensor(w1_weight, w1_weight_sf, is_ue8m0_scales=False)\n    W2 = _dequantize_fp4_tensor(w2_weight, w2_weight_sf, is_ue8m0_scales=False)\n    if interleaved_weights:\n        # Native CuTe GEMM1 stores alternating 64-row Up/Gate tiles.\n        W1 = W1.reshape(E_local, -1, 2, 64, W1.shape[-1])\n        W1 = W1.permute(0, 2, 1, 3, 4).reshape(E_local, w1_weight.shape[1], -1)\n    if per_token_scale is not None:\n        hs_deq = hs_deq * per_token_scale.to(torch.float32).view(-1, 1)\n    if w1_alpha.numel() == 2 * E_local:\n        gate_up = w1_alpha.to(torch.float32).view(E_local, 2)\n        # Reference weights are deinterleaved [Up, Gate]. Apply each scale\n        # before its nonlinear activation, independently of the kernel layout.\n        W1 = W1.reshape(E_local, 2, -1, W1.shape[-1])\n        W1 = W1 * gate_up.flip(1).view(E_local, 2, 1, 1)\n        W1 = W1.flatten(1, 2)\n    else:\n        W1 = W1 * w1_alpha.to(torch.float32).view(E_local, 1, 1)\n    W2 = W2 * w2_alpha.to(torch.float32).view(E_local, 1, 1)\n    return _moe_bf16_run_experts(\n        hs_deq,\n        W1,\n        W2,\n        token_final_scales,\n        token_selected_experts.to(torch.int64),\n        local_expert_offset=0,\n        E_global=int(num_experts),\n        activation_type=activation_type,\n        gemm1_alpha=swiglu_alpha,\n        gemm1_beta=swiglu_beta,\n        gemm1_clamp_limit=swiglu_limit,\n        situ_beta=situ_beta,\n        situ_linear_beta=situ_linear_beta,\n    )\n",
+  "check": "def standard_check(\n    reference_outputs: Any,\n    actual_outputs: Any,\n    *,\n    rtol: Optional[float] = None,\n    atol: Optional[float] = None,\n    max_mismatch_pct: float = 0.0,\n    min_cos_sim: Optional[float] = 1.0 - 1e-3,\n) -> bool:\n    \"\"\"Default trace correctness check used when a template does not override it.\"\"\"\n    from flashinfer.trace import default_check\n\n    return default_check(\n        reference_outputs,\n        actual_outputs,\n        rtol=rtol,\n        atol=atol,\n        max_mismatch_pct=max_mismatch_pct,\n        min_cos_sim=min_cos_sim,\n    )\n"
+}
