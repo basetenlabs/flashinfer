@@ -317,6 +317,7 @@ def gen_trtllm_gen_fused_moe_sm100_module(enable_rubin: bool = False) -> JitSpec
             jit_env.FLASHINFER_CSRC_DIR / "nv_internal/cpp/common/tllmException.cpp",
             jit_env.FLASHINFER_CSRC_DIR / "nv_internal/cpp/common/memoryUtils.cu",
             jit_env.FLASHINFER_CSRC_DIR / "trtllm_fused_moe_kernel_launcher.cu",
+            jit_env.FLASHINFER_CSRC_DIR / "trtllm_mxfp8_routed_gemm.cu",
             jit_env.FLASHINFER_CSRC_DIR / "trtllm_fused_moe_runner.cu",
             jit_env.FLASHINFER_CSRC_DIR
             / "fused_moe/trtllm_backend/trtllm_fused_moe_routing_runner.cu",

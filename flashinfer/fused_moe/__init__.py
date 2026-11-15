@@ -179,6 +179,12 @@ from .moe_lora_delta import (  # noqa: F401
     bgmv_moe_gemm1_lora_delta as bgmv_moe_gemm1_lora_delta,
     bgmv_moe_gemm2_lora_delta as bgmv_moe_gemm2_lora_delta,
 )
+from .routed_gemm import (
+    TrtllmMxfp8RoutedGemmConfig,
+    trtllm_mxfp8_routed_gemm,
+    trtllm_mxfp8_routed_gemm_configs,
+    trtllm_mxfp8_routed_gemm_route,
+)
 from .monomoe import (  # noqa: F401
     mono_moe as mono_moe,
     has_monomoe as has_monomoe,
@@ -274,6 +280,10 @@ __all__ = [
     "RoutingInputMode",
     "TrtllmMoERoutingMetadata",
     "TrtllmMoERoutingMetadataSlot",
+    "TrtllmMxfp8RoutedGemmConfig",
+    "trtllm_mxfp8_routed_gemm",
+    "trtllm_mxfp8_routed_gemm_configs",
+    "trtllm_mxfp8_routed_gemm_route",
     "trtllm_moe_allocate_routing_metadata",
     "trtllm_moe_allocate_routing_metadata_multi_tile",
     "trtllm_moe_acquire_da_graph_leases",
