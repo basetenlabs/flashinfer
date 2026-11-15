@@ -134,6 +134,23 @@ TensorRT-LLM Fused MoE
     trtllm_mxint4_block_scale_moe
     trtllm_mxint4_block_scale_routed_moe
 
+Routed MXFP4/MXFP8 GEMMs
+------------------------
+
+Use the split GEMM interface when an operation such as BF16 LoRA must run
+between the two expert projections. The caller owns routing, block-32 MXFP8
+quantization, activation and final reduction. Query buffer requirements before
+capture, populate routing metadata, and scatter quantized inputs into that
+route order. Each GEMM writes BF16 output without finalizing the MoE block.
+
+.. autosummary::
+    :toctree: ../generated
+
+    TrtllmMxfp8RoutedGemmConfig
+    trtllm_mxfp8_routed_gemm_configs
+    trtllm_mxfp8_routed_gemm_route
+    trtllm_mxfp8_routed_gemm
+
 Cake NVFP4 Warp Decode (SM103)
 ------------------------------
 
